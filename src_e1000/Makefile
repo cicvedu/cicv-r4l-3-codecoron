@@ -10,7 +10,7 @@ KDIR ?= ../linux
 BUILD_DIR ?= $(PWD)/build
 
 default:
-	$(MAKE) -C $(KDIR) M=$$PWD
+	$(MAKE) -C $(KDIR) CC=clang M=$$PWD
 
 ra:
 	$(MAKE) -C $(KDIR) LLVM=1 M=$$PWD rust-analyzer
