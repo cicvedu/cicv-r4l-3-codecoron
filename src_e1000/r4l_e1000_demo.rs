@@ -178,6 +178,13 @@ impl net::DeviceOperations for NetDevice {
         // we mustn't let it dropped.
         // TODO: there is memory leak now. 
         let req_reg = kernel::irq::Registration::<E1000InterruptHandler>::try_new(data.irq, irq_prv_data, kernel::irq::flags::SHARED, fmt!("{}",data.dev.name()))?;
+        
+        // the caller should properly destroy T and release the memory
+        /*
+        let x = Box::new(String::from("Hello"));
+        let ptr = Box::into_raw(x);
+        let x = unsafe { Box::from_raw(ptr) };
+         */
         data._irq_handler.store(Box::into_raw(Box::try_new(req_reg)?), core::sync::atomic::Ordering::Relaxed);
 
         data.napi.enable();
@@ -191,6 +198,20 @@ impl net::DeviceOperations for NetDevice {
 
     fn stop(_dev: &net::Device, _data: &NetDevicePrvData) -> Result {
         pr_info!("Rust for linux e1000 driver demo (net device stop)\n");
+        // NetDevice::e1000_recycle_tx_queue(&_dev, &_data);
+        // *_data.tx_ring.lock() = None;
+        // *_data.rx_ring.lock() = None;
+
+        // 经过试验，irq_handler必须要手动释放，否则ping无法注册handle
+        unsafe {
+            let _ = Box::from_raw(_data
+                ._irq_handler
+                .load(core::sync::atomic::Ordering::Relaxed));
+        }
+
+        // _dev.netif_carrier_off();
+        // _dev.netif_stop_queue();
+        // _data.napi.disable();
         Ok(())
     }
 
@@ -293,7 +314,10 @@ impl kernel::irq::Handler for E1000InterruptHandler {
 /// the private data for the adapter
 struct E1000DrvPrvData {
     _netdev_reg: net::Registration<NetDevice>,
+    pci_dev_ptr: *mut bindings::pci_dev,
 }
+unsafe impl Send for E1000DrvPrvData {}
+unsafe impl Sync for E1000DrvPrvData {}
 
 impl driver::DeviceRemoval for E1000DrvPrvData {
     fn device_remove(&self) {
@@ -462,11 +486,19 @@ impl pci::Driver for E1000Drv {
             E1000DrvPrvData{
                 // Must hold this registration, or the device will be removed.
                 _netdev_reg: netdev_reg,
+                pci_dev_ptr: dev.to_ptr(),
             }
         )?)
     }
 
     fn remove(data: &Self::Data) {
+        let pci_dev_ptr = data.pci_dev_ptr;
+        unsafe {
+            // bindings::pci_clear_master(pci_dev_ptr);
+            // bindings::pci_release_selected_regions(pci_dev_ptr, bars);
+            bindings::pci_release_regions(pci_dev_ptr);
+            bindings::pci_disable_device(pci_dev_ptr);
+        };
         pr_info!("Rust for linux e1000 driver demo (remove)\n");
     }
 }
