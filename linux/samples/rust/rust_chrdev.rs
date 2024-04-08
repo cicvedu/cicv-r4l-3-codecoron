@@ -2,7 +2,7 @@
 
 //! Rust character device sample.
 
-use core::result::Result::Err;
+use core::result::Result::{Err, Ok};
 
 use kernel::prelude::*;
 use kernel::sync::Mutex;
@@ -40,11 +40,37 @@ impl file::Operations for RustFile {
     }
 
     fn write(_this: &Self,_file: &file::File,_reader: &mut impl kernel::io_buffer::IoBufferReader,_offset:u64,) -> Result<usize> {
-        Err(EPERM)
+        
+        // Writes data from the caller's buffer to this file.
+        let buf = &mut _this.inner.lock();
+        // 约定，将从buf读取的字节数返回
+        // 上层会将return 作为下次调用的offset , 持续调用write
+        let mut len = _reader.len();
+        pr_info!("in write\n");
+        pr_info!("offset {}\n",_offset);
+        pr_info!("len {}\n",len);
+        if len > GLOBALMEM_SIZE {
+            len = GLOBALMEM_SIZE;
+        }
+        // _reader.read_slice(&mut **buf)?;  // 编译通过，但是写数据出现 address error
+        _reader.read_slice(&mut buf[_offset as usize ..len])?;
+        Ok(len)
     }
 
     fn read(_this: &Self,_file: &file::File,_writer: &mut impl kernel::io_buffer::IoBufferWriter,_offset:u64,) -> Result<usize> {
-        Err(EPERM)
+        // Reads data from this file to the caller's buffer.
+        let data = &mut _this.inner.lock();
+        // 约定要将写入buf的字节数返回
+        // offset 用来判断读取进度---- 上层调用会持续调用read() 
+        if _offset as usize >= GLOBALMEM_SIZE {
+            return Ok(0);
+        }
+        let _len = _writer.len();
+        pr_info!("in read\n");
+        pr_info!("offset {}\n",_offset);
+        pr_info!("len {}\n",_len);
+        _writer.write_slice(&data[_offset as usize..])?;
+        Ok(_len)
     }
 }
 
